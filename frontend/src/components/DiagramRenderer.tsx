@@ -13,6 +13,7 @@ interface DiagramRendererProps {
 export function DiagramRenderer({ code, isLoading }: DiagramRendererProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const panZoomRef = useRef<ReturnType<typeof import("svg-pan-zoom")> | null>(null);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -31,6 +32,10 @@ export function DiagramRenderer({ code, isLoading }: DiagramRendererProps) {
       try {
         setError(null);
 
+        if (resizeObserverRef.current) {
+          resizeObserverRef.current.disconnect();
+          resizeObserverRef.current = null;
+        }
         if (panZoomRef.current) {
           panZoomRef.current.destroy();
           panZoomRef.current = null;
@@ -50,7 +55,7 @@ export function DiagramRenderer({ code, isLoading }: DiagramRendererProps) {
           svgEl.style.maxHeight = "none";
 
           const { default: svgPanZoom } = await import("svg-pan-zoom");
-          panZoomRef.current = svgPanZoom(svgEl, {
+          const pz = svgPanZoom(svgEl, {
             zoomEnabled: true,
             controlIconsEnabled: false,
             fit: true,
@@ -62,6 +67,23 @@ export function DiagramRenderer({ code, isLoading }: DiagramRendererProps) {
             mouseWheelZoomEnabled: true,
             preventMouseEventsDefault: true,
           });
+          panZoomRef.current = pz;
+
+          // The first fit/center runs before flex layout settles, leaving the
+          // diagram pinned to the top with empty space below. Re-fit after a
+          // frame and on subsequent container resizes.
+          const refit = () => {
+            pz.resize();
+            pz.fit();
+            pz.center();
+          };
+          requestAnimationFrame(refit);
+
+          if (containerRef.current) {
+            const ro = new ResizeObserver(refit);
+            ro.observe(containerRef.current);
+            resizeObserverRef.current = ro;
+          }
         }
       } catch (err: unknown) {
         console.error("Mermaid syntax error:", err);
@@ -74,6 +96,10 @@ export function DiagramRenderer({ code, isLoading }: DiagramRendererProps) {
     }
 
     return () => {
+      if (resizeObserverRef.current) {
+        resizeObserverRef.current.disconnect();
+        resizeObserverRef.current = null;
+      }
       if (panZoomRef.current) {
         panZoomRef.current.destroy();
         panZoomRef.current = null;
